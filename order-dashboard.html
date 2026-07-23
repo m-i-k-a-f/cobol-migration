@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>東邦フィナンシャルシステムズ — 注文フロー監視</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+JP:wght@300;400;600&display=swap');
+
+:root {
+  --bg:       #080c14;
+  --surface:  #0f1623;
+  --border:   #1e2d45;
+  --text:     #c8d8ee;
+  --muted:    #4a6080;
+  --accent:   #00d4ff;
+  --buy:      #3d9eff;
+  --sell:     #ff6b3d;
+  --warn:     #ffc94d;
+  --error:    #ff3d5a;
+  --ok:       #2ecc71;
+  --partial:  #a78bfa;
+  --cancel:   #6b7a8d;
+  --mono:     'IBM Plex Mono', 'Courier New', monospace;
+  --sans:     'IBM Plex Sans JP', 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  min-width: 1280px;
+  padding: 0;
+}
+
+/* ── Header ── */
+#header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+#header .title-block .sys {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+#header .title-block h1 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: .04em;
+}
+#header .meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
+#header .meta .ts { color: var(--text); margin-top: 2px; font-size: 13px; }
+.dot-live {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  margin-right: 6px;
+  animation: pulse 1.8s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,100%{ opacity:1; } 50%{ opacity:.3; }
+}
+
+/* ── Layout ── */
+#wrap { padding: 24px 32px 48px; }
+
+/* ── KPI ── */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.kpi-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--accent);
+  padding: 18px 20px;
+}
+.kpi-card.kpi-fill   { border-top-color: var(--ok); }
+.kpi-card.kpi-pend   { border-top-color: var(--warn); }
+.kpi-card.kpi-cancel { border-top-color: var(--muted); }
+.kpi-label {
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-family: var(--mono);
+  margin-bottom: 10px;
+}
+.kpi-val {
+  font-family: var(--mono);
+  font-size: 36px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1;
+}
+.kpi-sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.kpi-sub span { color: var(--ok); }
+
+/* ── 2-column chart row ── */
+.chart-row {
+  display: grid;
+  grid-template-columns: 420px 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.chart-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 20px;
+}
+.chart-title {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chart-title::before {
+  content: '';
+  display: inline-block;
+  width: 3px; height: 12px;
+  background: var(--accent);
+}
+
+/* ── Pie ── */
+#pie-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+}
+#pie-svg { flex-shrink: 0; }
+#pie-legend { display: flex; flex-direction: column; gap: 9px; padding-top: 8px; }
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.legend-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}
+.legend-name { color: var(--text); flex: 1; }
+.legend-count { font-family: var(--mono); color: var(--muted); font-size: 11px; width: 38px; text-align: right; }
+.legend-pct   { font-family: var(--mono); color: var(--accent); font-size: 11px; width: 42px; text-align: right; }
+
+/* ── Bar chart ── */
+#bar-svg { display: block; }
+
+/* ── Line chart ── */
+.chart-card.full { margin-bottom: 16px; }
+#line-svg { display: block; }
+
+/* ── Alerts ── */
+#alert-area {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.alert-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  border-left-width: 3px;
+  border-left-style: solid;
+}
+.alert-item:last-child { margin-bottom: 0; }
+.alert-warn { background: rgba(255,201,77,.07); border-left-color: var(--warn); color: var(--warn); }
+.alert-err  { background: rgba(255,61,90,.07);  border-left-color: var(--error); color: var(--error); }
+.alert-icon { font-size: 15px; margin-top: 1px; flex-shrink: 0; }
+.alert-body .alert-head { font-weight: 600; margin-bottom: 2px; }
+.alert-body .alert-detail { font-size: 11px; font-family: var(--mono); opacity: .75; }
+.no-alert { font-family: var(--mono); font-size: 12px; color: var(--ok); display: flex; align-items: center; gap: 8px; }
+
+/* ── Table ── */
+.chart-card.full table { width: 100%; border-collapse: collapse; }
+.chart-card.full table th {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+.chart-card.full table td {
+  font-size: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(30,45,69,.6);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.chart-card.full table tr:hover td { background: rgba(0,212,255,.03); }
+.td-mono { font-family: var(--mono); }
+.td-buy  { color: var(--buy); font-weight: 600; }
+.td-sell { color: var(--sell); font-weight: 600; }
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+.badge-done    { background: rgba(0,212,255,.12); color: var(--accent); }
+.badge-open    { background: rgba(61,158,255,.12); color: var(--buy); }
+.badge-partial { background: rgba(167,139,250,.12); color: var(--partial); }
+.badge-cancel  { background: rgba(107,122,141,.12); color: var(--cancel); }
+.badge-error   { background: rgba(255,61,90,.15); color: var(--error); }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div class="title-block">
+    <div class="sys">東邦フィナンシャルシステムズ — 証券運用監視システム</div>
+    <h1><span class="dot-live"></span>リアルタイム注文フロー監視ダッシュボード</h1>
+  </div>
+  <div class="meta">
+    <div>TRADING DATE: <span id="hdr-date"></span></div>
+    <div class="ts" id="hdr-time"></div>
+  </div>
+</div>
+
+<div id="wrap">
+
+  <!-- KPI -->
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">本日の注文件数合計</div>
+      <div class="kpi-val" id="kpi-total">0</div>
+      <div class="kpi-sub">買い＋売り＋取消</div>
+    </div>
+    <div class="kpi-card kpi-fill">
+      <div class="kpi-label">約定件数 / 約定率</div>
+      <div class="kpi-val" id="kpi-filled">0</div>
+      <div class="kpi-sub">約定率 <span id="kpi-rate">0.0</span>%</div>
+    </div>
+    <div class="kpi-card kpi-pend">
+      <div class="kpi-label">未約定件数</div>
+      <div class="kpi-val" id="kpi-open">0</div>
+      <div class="kpi-sub">受付済み・約定待ち</div>
+    </div>
+    <div class="kpi-card kpi-cancel">
+      <div class="kpi-label">取消件数</div>
+      <div class="kpi-val" id="kpi-cancel">0</div>
+      <div class="kpi-sub">取消処理済み</div>
+    </div>
+  </div>
+
+  <!-- 2-column: pie + bar -->
+  <div class="chart-row">
+    <div class="chart-card" id="pie-area">
+      <div class="chart-title">注文ステータス分布</div>
+      <div id="pie-wrap"></div>
+    </div>
+    <div class="chart-card" id="bar-area">
+      <div class="chart-title">銘柄別注文件数ランキング（上位10銘柄）</div>
+      <div id="bar-inner"></div>
+    </div>
+  </div>
+
+  <!-- Line chart -->
+  <div class="chart-card full">
+    <div class="chart-title">時間帯別注文件数（09:00〜15:30）</div>
+    <div id="line-inner"></div>
+  </div>
+
+  <!-- Alerts -->
+  <div id="alert-area">
+    <div class="chart-title">異常検知アラート</div>
+    <div id="alert-list"></div>
+  </div>
+
+  <!-- Table -->
+  <div class="chart-card full">
+    <div class="chart-title">注文明細（直近20件）</div>
+    <table>
+      <thead>
+        <tr>
+          <th>注文ID</th>
+          <th>時刻</th>
+          <th>銘柄コード</th>
+          <th>銘柄名</th>
+          <th>売買区分</th>
+          <th>注文株数</th>
+          <th>注文単価 (円)</th>
+          <th>ステータス</th>
+        </tr>
+      </thead>
+      <tbody id="order-tbody"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+/* ════════════════════════════════════
+   1. DUMMY DATA
+════════════════════════════════════ */
+const STOCKS = [
+  { code:'7203', name:'トヨタ自動車',       price:2850,  buyRatio:.58 },
+  { code:'6758', name:'ソニーグループ',      price:13200, buyRatio:.52 },
+  { code:'6861', name:'キーエンス',          price:67500, buyRatio:.55 },
+  { code:'8306', name:'三菱UFJフィナンシャル',price:1420, buyRatio:.61 },
+  { code:'9984', name:'ソフトバンクグループ', price:8200, buyRatio:.47 },
+  { code:'6954', name:'ファナック',          price:4120,  buyRatio:.50 },
+  { code:'4063', name:'信越化学工業',        price:6230,  buyRatio:.54 },
+  { code:'8035', name:'東京エレクトロン',    price:35800, buyRatio:.53 },
+  { code:'6367', name:'ダイキン工業',        price:24600, buyRatio:.49 },
+  { code:'9432', name:'NTT',               price:178,   buyRatio:.56 },
+];
+
+// 時系列: 14スロット (09:00〜15:30, 30分刻み)
+const SLOTS = [
+  '09:00','09:30','10:00','10:30','11:00','11:30',
+  '12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30'
+];
+// 各スロット {buy, sell, cancel}
+// 13:00スロット(index=8) を急増させる。前スロット(12:30, index=7)比 +53%
+const TIME_SERIES = [
+  {buy:18, sell:14, cancel:2},  // 09:00  (合計34)
+  {buy:24, sell:18, cancel:3},  // 09:30  (合計45, +32%) ← 急増にならない
+  {buy:28, sell:21, cancel:3},  // 10:00  (合計52, +16%)
+  {buy:26, sell:20, cancel:2},  // 10:30  (合計48)
+  {buy:30, sell:23, cancel:3},  // 11:00  (合計56)
+  {buy:33, sell:25, cancel:3},  // 11:30  (合計61)
+  {buy:22, sell:18, cancel:2},  // 12:00  (合計42)
+  {buy:19, sell:13, cancel:2},  // 12:30  (合計34)
+  {buy:31, sell:20, cancel:2},  // 13:00  (合計53, 前比+56%) ← ALERT
+  {buy:28, sell:22, cancel:3},  // 13:30  (合計53)
+  {buy:33, sell:25, cancel:3},  // 14:00  (合計61)
+  {buy:38, sell:29, cancel:4},  // 14:30  (合計71)
+  {buy:40, sell:30, cancel:4},  // 15:00  (合計74)
+  {buy:36, sell:27, cancel:3},  // 15:30  (合計66)
+];
+
+// ステータス件数（合計847）
+const STATUS_COUNTS = {
+  done:    480,  // 約定済
+  open:    195,  // 受付中
+  partial: 110,  // 一部約定
+  cancel:   55,  // 取消済
+  error:     7,  // エラー
+};
+const STATUS_LABELS = {
+  done:'約定済', open:'受付中', partial:'一部約定', cancel:'取消済', error:'エラー'
+};
+const STATUS_COLORS = {
+  done: '#00d4ff', open: '#3d9eff', partial: '#a78bfa', cancel: '#6b7a8d', error: '#ff3d5a'
+};
+
+// 銘柄別件数（合計847に合わせて設計）
+const STOCK_ORDERS = [
+  { code:'7203', name:'トヨタ自動車',          total:162, buyRatio:.58 },
+  { code:'6758', name:'ソニーグループ',         total:138, buyRatio:.52 },
+  { code:'8306', name:'三菱UFJフィナンシャル',  total:124, buyRatio:.61 },
+  { code:'9984', name:'ソフトバンクグループ',   total:108, buyRatio:.47 },
+  { code:'8035', name:'東京エレクトロン',       total:97,  buyRatio:.53 },
+  { code:'6861', name:'キーエンス',             total:82,  buyRatio:.55 },
+  { code:'6954', name:'ファナック',             total:68,  buyRatio:.50 },
+  { code:'9432', name:'NTT',                   total:55,  buyRatio:.56 },
+  { code:'4063', name:'信越化学工業',           total:42,  buyRatio:.54 },
+  { code:'6367', name:'ダイキン工業',           total:37,  buyRatio:.49 },
+  // 残り: 847 - (162+138+124+108+97+82+68+55+42+37) = 847-913 → adjust
+  // 実際に847に合わせる: 162+138+124+108+97+82+68+55+42+37 = 913、多い。
+  // 調整: 847になるよう各銘柄を再設定
+];
+
+// 再計算版（合計=847）
+const STOCK_RANKS = [
+  { code:'7203', name:'トヨタ自動車',          total:148, buyRatio:.58 },
+  { code:'6758', name:'ソニーグループ',         total:122, buyRatio:.52 },
+  { code:'8306', name:'三菱UFJフィナンシャル',  total:108, buyRatio:.61 },
+  { code:'9984', name:'ソフトバンクグループ',   total:95,  buyRatio:.47 },
+  { code:'8035', name:'東京エレクトロン',       total:88,  buyRatio:.53 },
+  { code:'6861', name:'キーエンス',             total:74,  buyRatio:.55 },
+  { code:'6954', name:'ファナック',             total:61,  buyRatio:.50 },
+  { code:'9432', name:'NTT',                   total:52,  buyRatio:.56 },
+  { code:'4063', name:'信越化学工業',           total:55,  buyRatio:.54 },
+  { code:'6367', name:'ダイキン工業',           total:44,  buyRatio:.49 },
+  // sum = 148+122+108+95+88+74+61+52+55+44 = 847
+];
+
+// 注文明細（847件）生成
+function buildOrders() {
+  const statusPool = [];
+  Object.entries(STATUS_COUNTS).forEach(([st, cnt]) => {
+    for (let i = 0; i < cnt; i++) statusPool.push(st);
+  });
+  // shuffle
+  for (let i = statusPool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [statusPool[i], statusPool[j]] = [statusPool[j], statusPool[i]];
+  }
+
+  // time distribution by slot totals
+  const slotTotals = TIME_SERIES.map(s => s.buy + s.sell + s.cancel);
+  const totalOrders = slotTotals.reduce((a,b)=>a+b,0);
+
+  const orders = [];
+  let statusIdx = 0;
+
+  SLOTS.forEach((slot, si) => {
+    const slotCount = Math.round((slotTotals[si] / totalOrders) * 847);
+    const [hh, mm] = slot.split(':').map(Number);
+    for (let i = 0; i < slotCount && statusIdx < statusPool.length; i++) {
+      const stock = STOCKS[Math.floor(Math.random() * STOCKS.length)];
+      const isBuy = Math.random() < stock.buyRatio;
+      const lots  = (Math.floor(Math.random() * 10) + 1) * 100;
+      const price = Math.round(stock.price * (0.97 + Math.random() * 0.06));
+      const secRand = Math.floor(Math.random() * 1800);
+      const totalSec = hh * 3600 + mm * 60 + secRand;
+      const th = String(Math.floor(totalSec/3600)).padStart(2,'0');
+      const tm = String(Math.floor((totalSec%3600)/60)).padStart(2,'0');
+      const ts = String(totalSec%60).padStart(2,'0');
+      const id = 'ORD-' + String(10000000 + statusIdx).padStart(8,'0');
+      orders.push({
+        id, time: `${th}:${tm}:${ts}`,
+        code: stock.code, name: stock.name,
+        side: isBuy ? '買' : '売',
+        lots, price,
+        status: statusPool[statusIdx++],
+        sortKey: totalSec,
+      });
+    }
+  });
+
+  // fill remaining
+  while (statusIdx < statusPool.length) {
+    const stock = STOCKS[Math.floor(Math.random() * STOCKS.length)];
+    const isBuy = Math.random() < stock.buyRatio;
+    const lots  = (Math.floor(Math.random() * 10) + 1) * 100;
+    const price = Math.round(stock.price * (0.97 + Math.random() * 0.06));
+    const hh = 9 + Math.floor(Math.random() * 6);
+    const mm = Math.floor(Math.random() * 60);
+    const ss = Math.floor(Math.random() * 60);
+    const th = String(hh).padStart(2,'0');
+    const tm = String(mm).padStart(2,'0');
+    const ts = String(ss).padStart(2,'0');
+    const totalSec = hh*3600+mm*60+ss;
+    const id = 'ORD-' + String(10000000 + statusIdx).padStart(8,'0');
+    orders.push({
+      id, time:`${th}:${tm}:${ts}`,
+      code:stock.code, name:stock.name,
+      side: isBuy?'買':'売',
+      lots, price,
+      status: statusPool[statusIdx++],
+      sortKey: totalSec,
+    });
+  }
+
+  orders.sort((a,b) => b.sortKey - a.sortKey);
+  return orders;
+}
+
+const ORDERS = buildOrders();
+
+/* ════════════════════════════════════
+   2. HEADER
+════════════════════════════════════ */
+(function initHeader(){
+  const now = new Date();
+  const ymd = now.toLocaleDateString('ja-JP',{year:'numeric',month:'2-digit',day:'2-digit'});
+  document.getElementById('hdr-date').textContent = ymd;
+  document.getElementById('hdr-time').textContent =
+    now.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit',second:'2-digit'}) + ' JST';
+})();
+
+/* ════════════════════════════════════
+   3. KPI + COUNTUP
+════════════════════════════════════ */
+function animateCount(el, target, isFloat, duration) {
+  const start = performance.now();
+  function step(now) {
+    const p = Math.min((now - start) / duration, 1);
+    const ease = 1 - Math.pow(1 - p, 3);
+    const val = target * ease;
+    el.textContent = isFloat ? val.toFixed(1) : Math.round(val).toLocaleString();
+    if (p < 1) requestAnimationFrame(step);
+    else el.textContent = isFloat ? target.toFixed(1) : target.toLocaleString();
+  }
+  requestAnimationFrame(step);
+}
+
+function initKPIs() {
+  const total   = Object.values(STATUS_COUNTS).reduce((a,b)=>a+b,0);
+  const filled  = STATUS_COUNTS.done;
+  const open    = STATUS_COUNTS.open;
+  const cancel  = STATUS_COUNTS.cancel;
+  const rate    = (filled / total) * 100;
+
+  animateCount(document.getElementById('kpi-total'),  total,  false, 1400);
+  animateCount(document.getElementById('kpi-filled'), filled, false, 1400);
+  animateCount(document.getElementById('kpi-open'),   open,   false, 1400);
+  animateCount(document.getElementById('kpi-cancel'), cancel, false, 1400);
+  animateCount(document.getElementById('kpi-rate'),   rate,   true,  1400);
+}
+
+/* ════════════════════════════════════
+   4. SVG PIE CHART
+════════════════════════════════════ */
+function polarToXY(cx, cy, r, angleDeg) {
+  const rad = (angleDeg - 90) * Math.PI / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+function slicePath(cx, cy, r, startDeg, endDeg) {
+  const large = (endDeg - startDeg) > 180 ? 1 : 0;
+  const s = polarToXY(cx, cy, r, startDeg);
+  const e = polarToXY(cx, cy, r, endDeg);
+  return `M ${cx} ${cy} L ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${e.x.toFixed(2)} ${e.y.toFixed(2)} Z`;
+}
+
+function initPie() {
+  const cx = 140, cy = 140, r = 110, innerR = 50;
+  const total = Object.values(STATUS_COUNTS).reduce((a,b)=>a+b,0);
+  const keys = Object.keys(STATUS_COUNTS);
+
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('width', '280');
+  svg.setAttribute('height', '280');
+  svg.setAttribute('id', 'pie-svg');
+
+  let startDeg = 0;
+  keys.forEach(key => {
+    const cnt = STATUS_COUNTS[key];
+    const deg = (cnt / total) * 360;
+    const endDeg = startDeg + deg - (deg === 360 ? 0.001 : 0);
+
+    const path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('d', slicePath(cx, cy, r, startDeg, endDeg < startDeg + 360 ? endDeg : startDeg + 359.999));
+    path.setAttribute('fill', STATUS_COLORS[key]);
+    path.setAttribute('opacity', '0.9');
+    svg.appendChild(path);
+
+    // label on slice
+    const midDeg = startDeg + deg / 2;
+    const lr = r * 0.68;
+    const lp = polarToXY(cx, cy, lr, midDeg);
+    if (cnt / total > 0.05) {
+      const pct = ((cnt/total)*100).toFixed(1);
+      const txt = document.createElementNS(svgNS, 'text');
+      txt.setAttribute('x', lp.x.toFixed(1));
+      txt.setAttribute('y', lp.y.toFixed(1));
+      txt.setAttribute('text-anchor', 'middle');
+      txt.setAttribute('dominant-baseline', 'middle');
+      txt.setAttribute('fill', '#fff');
+      txt.setAttribute('font-size', '11');
+      txt.setAttribute('font-family', 'IBM Plex Mono, monospace');
+      txt.setAttribute('font-weight', '600');
+      txt.textContent = pct + '%';
+      svg.appendChild(txt);
+    }
+
+    startDeg += deg;
+  });
+
+  // donut hole
+  const hole = document.createElementNS(svgNS, 'circle');
+  hole.setAttribute('cx', cx); hole.setAttribute('cy', cy); hole.setAttribute('r', innerR);
+  hole.setAttribute('fill', '#0f1623');
+  svg.appendChild(hole);
+
+  // center label
+  const cl = document.createElementNS(svgNS, 'text');
+  cl.setAttribute('x', cx); cl.setAttribute('y', cy - 8);
+  cl.setAttribute('text-anchor', 'middle');
+  cl.setAttribute('fill', '#c8d8ee');
+  cl.setAttribute('font-size', '13');
+  cl.setAttribute('font-family', 'IBM Plex Mono, monospace');
+  cl.setAttribute('font-weight', '600');
+  cl.textContent = total.toLocaleString();
+  svg.appendChild(cl);
+
+  const cl2 = document.createElementNS(svgNS, 'text');
+  cl2.setAttribute('x', cx); cl2.setAttribute('y', cy + 10);
+  cl2.setAttribute('text-anchor', 'middle');
+  cl2.setAttribute('fill', '#4a6080');
+  cl2.setAttribute('font-size', '10');
+  cl2.setAttribute('font-family', 'IBM Plex Mono, monospace');
+  cl2.textContent = '件';
+  svg.appendChild(cl2);
+
+  // legend
+  const legendDiv = document.createElement('div');
+  legendDiv.id = 'pie-legend';
+  keys.forEach(key => {
+    const cnt = STATUS_COUNTS[key];
+    const pct = ((cnt / total)*100).toFixed(1);
+    const row = document.createElement('div');
+    row.className = 'legend-row';
+    row.innerHTML = `
+      <div class="legend-dot" style="background:${STATUS_COLORS[key]}"></div>
+      <div class="legend-name">${STATUS_LABELS[key]}</div>
+      <div class="legend-count">${cnt}</div>
+      <div class="legend-pct">${pct}%</div>`;
+    legendDiv.appendChild(row);
+  });
+
+  const wrap = document.getElementById('pie-wrap');
+  wrap.appendChild(svg);
+  wrap.appendChild(legendDiv);
+}
+
+/* ════════════════════════════════════
+   5. SVG BAR CHART
+════════════════════════════════════ */
+function initBar() {
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const sorted = [...STOCK_RANKS].sort((a,b) => b.total - a.total);
+  const maxVal = sorted[0].total;
+  const barW = 560;  // available width for bars
+  const rowH = 36;
+  const labelW = 180;
+  const barAreaW = barW - labelW - 60;
+  const svgH = sorted.length * rowH + 16;
+
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', svgH);
+  svg.setAttribute('id', 'bar-svg');
+  svg.setAttribute('viewBox', `0 0 ${barW} ${svgH}`);
+
+  sorted.forEach((stock, i) => {
+    const y = i * rowH + 10;
+    const isBuyDominant = stock.buyRatio >= 0.5;
+    const barColor = isBuyDominant ? '#3d9eff' : '#ff6b3d';
+    const barLen = (stock.total / maxVal) * barAreaW;
+
+    // code label
+    const codeT = document.createElementNS(svgNS, 'text');
+    codeT.setAttribute('x', '0'); codeT.setAttribute('y', y + 14);
+    codeT.setAttribute('fill', '#4a6080');
+    codeT.setAttribute('font-size', '10');
+    codeT.setAttribute('font-family', 'IBM Plex Mono, monospace');
+    codeT.textContent = stock.code;
+    svg.appendChild(codeT);
+
+    // name label
+    const nameT = document.createElementNS(svgNS, 'text');
+    nameT.setAttribute('x', '44'); nameT.setAttribute('y', y + 14);
+    nameT.setAttribute('fill', '#c8d8ee');
+    nameT.setAttribute('font-size', '12');
+    nameT.setAttribute('font-family', "'IBM Plex Sans JP','Hiragino Kaku Gothic ProN',sans-serif");
+    nameT.textContent = stock.name.length > 9 ? stock.name.slice(0,9)+'…' : stock.name;
+    svg.appendChild(nameT);
+
+    // bar background
+    const bgRect = document.createElementNS(svgNS, 'rect');
+    bgRect.setAttribute('x', labelW); bgRect.setAttribute('y', y + 2);
+    bgRect.setAttribute('width', barAreaW); bgRect.setAttribute('height', 20);
+    bgRect.setAttribute('fill', 'rgba(30,45,69,0.5)');
+    svg.appendChild(bgRect);
+
+    // bar fill
+    const rect = document.createElementNS(svgNS, 'rect');
+    rect.setAttribute('x', labelW); rect.setAttribute('y', y + 2);
+    rect.setAttribute('width', barLen.toFixed(1)); rect.setAttribute('height', 20);
+    rect.setAttribute('fill', barColor);
+    rect.setAttribute('opacity', '0.85');
+    svg.appendChild(rect);
+
+    // count label
+    const cntT = document.createElementNS(svgNS, 'text');
+    cntT.setAttribute('x', (labelW + barLen + 6).toFixed(1));
+    cntT.setAttribute('y', y + 16);
+    cntT.setAttribute('fill', barColor);
+    cntT.setAttribute('font-size', '11');
+    cntT.setAttribute('font-family', 'IBM Plex Mono, monospace');
+    cntT.setAttribute('font-weight', '600');
+    cntT.textContent = stock.total;
+    svg.appendChild(cntT);
+
+    // side badge
+    const sideT = document.createElementNS(svgNS, 'text');
+    sideT.setAttribute('x', (barW - 2).toFixed(1)); sideT.setAttribute('y', y + 15);
+    sideT.setAttribute('text-anchor', 'end');
+    sideT.setAttribute('fill', isBuyDominant ? '#3d9eff' : '#ff6b3d');
+    sideT.setAttribute('font-size', '10');
+    sideT.setAttribute('font-family', 'IBM Plex Mono, monospace');
+    sideT.textContent = isBuyDominant ? '買優勢' : '売優勢';
+    svg.appendChild(sideT);
+  });
+
+  document.getElementById('bar-inner').appendChild(svg);
+}
+
+/* ════════════════════════════════════
+   6. SVG LINE CHART
+════════════════════════════════════ */
+function initLine() {
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const W = 1160, H = 220;
+  const padL = 48, padR = 20, padT = 16, padB = 48;
+  const chartW = W - padL - padR;
+  const chartH = H - padT - padB;
+
+  const allVals = TIME_SERIES.flatMap(s => [s.buy, s.sell, s.cancel]);
+  const maxY = Math.ceil(Math.max(...allVals) / 5) * 5 + 5;
+
+  const xScale = i => padL + (i / (SLOTS.length - 1)) * chartW;
+  const yScale = v => padT + chartH - (v / maxY) * chartH;
+
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', H);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  // grid lines
+  [0, 0.25, 0.5, 0.75, 1].forEach(p => {
+    const y = padT + p * chartH;
+    const line = document.createElementNS(svgNS, 'line');
+    line.setAttribute('x1', padL); line.setAttribute('x2', W - padR);
+    line.setAttribute('y1', y); line.setAttribute('y2', y);
+    line.setAttribute('stroke', '#1e2d45'); line.setAttribute('stroke-width', '1');
+    svg.appendChild(line);
+    const val = Math.round(maxY * (1-p));
+    const t = document.createElementNS(svgNS, 'text');
+    t.setAttribute('x', padL - 6); t.setAttribute('y', y + 4);
+    t.setAttribute('text-anchor', 'end');
+    t.setAttribute('fill', '#4a6080'); t.setAttribute('font-size', '10');
+    t.setAttribute('font-family', 'IBM Plex Mono, monospace');
+    t.textContent = val;
+    svg.appendChild(t);
+  });
+
+  // x-axis labels
+  SLOTS.forEach((slot, i) => {
+    const x = xScale(i);
+    const t = document.createElementNS(svgNS, 'text');
+    t.setAttribute('x', x); t.setAttribute('y', H - 8);
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('fill', '#4a6080'); t.setAttribute('font-size', '10');
+    t.setAttribute('font-family', 'IBM Plex Mono, monospace');
+    t.textContent = slot;
+    svg.appendChild(t);
+
+    const tick = document.createElementNS(svgNS, 'line');
+    tick.setAttribute('x1', x); tick.setAttribute('x2', x);
+    tick.setAttribute('y1', padT + chartH); tick.setAttribute('y2', padT + chartH + 4);
+    tick.setAttribute('stroke', '#1e2d45');
+    svg.appendChild(tick);
+  });
+
+  // series
+  const SERIES = [
+    { key:'buy',    color:'#3d9eff', label:'買い' },
+    { key:'sell',   color:'#ff6b3d', label:'売り' },
+    { key:'cancel', color:'#4a6080', label:'取消' },
+  ];
+
+  SERIES.forEach(series => {
+    const pts = TIME_SERIES.map((s,i) =>
+      `${xScale(i).toFixed(1)},${yScale(s[series.key]).toFixed(1)}`
+    ).join(' ');
+
+    const poly = document.createElementNS(svgNS, 'polyline');
+    poly.setAttribute('points', pts);
+    poly.setAttribute('fill', 'none');
+    poly.setAttribute('stroke', series.color);
+    poly.setAttribute('stroke-width', '2');
+    poly.setAttribute('stroke-linejoin', 'round');
+    poly.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(poly);
+
+    // dots
+    TIME_SERIES.forEach((s, i) => {
+      const dot = document.createElementNS(svgNS, 'circle');
+      dot.setAttribute('cx', xScale(i).toFixed(1));
+      dot.setAttribute('cy', yScale(s[series.key]).toFixed(1));
+      dot.setAttribute('r', '3');
+      dot.setAttribute('fill', series.color);
+      svg.appendChild(dot);
+    });
+  });
+
+  // legend
+  let lx = padL;
+  SERIES.forEach(s => {
+    const line = document.createElementNS(svgNS, 'line');
+    line.setAttribute('x1', lx); line.setAttribute('x2', lx+20);
+    line.setAttribute('y1', 8); line.setAttribute('y2', 8);
+    line.setAttribute('stroke', s.color); line.setAttribute('stroke-width', '2');
+    svg.appendChild(line);
+
+    const t = document.createElementNS(svgNS, 'text');
+    t.setAttribute('x', lx+24); t.setAttribute('y', 12);
+    t.setAttribute('fill', '#c8d8ee'); t.setAttribute('font-size', '11');
+    t.setAttribute('font-family', "'IBM Plex Sans JP',sans-serif");
+    t.textContent = s.label;
+    svg.appendChild(t);
+    lx += 72;
+  });
+
+  document.getElementById('line-inner').appendChild(svg);
+}
+
+/* ════════════════════════════════════
+   7. ALERTS
+════════════════════════════════════ */
+function initAlerts() {
+  const alerts = [];
+
+  // 黄色アラート: 前スロット比 +50%超
+  for (let i = 1; i < TIME_SERIES.length; i++) {
+    const prev = TIME_SERIES[i-1];
+    const curr = TIME_SERIES[i];
+    const prevTotal = prev.buy + prev.sell + prev.cancel;
+    const currTotal = curr.buy + curr.sell + curr.cancel;
+    if (prevTotal > 0 && (currTotal - prevTotal) / prevTotal > 0.5) {
+      alerts.push({
+        type: 'warn',
+        head: `注文急増検知 — ${SLOTS[i]}〜${SLOTS[i] === '15:30' ? '終了' : (parseInt(SLOTS[i].split(':')[1]) === 30 ? (parseInt(SLOTS[i].split(':')[0])+1)+':00' : SLOTS[i].split(':')[0]+':30')} スロット`,
+        detail: `前スロット: ${prevTotal}件 → 当スロット: ${currTotal}件 (+${(((currTotal-prevTotal)/prevTotal)*100).toFixed(0)}%)`
+      });
+    }
+  }
+
+  // 赤アラート: エラー5件超
+  if (STATUS_COUNTS.error > 5) {
+    alerts.push({
+      type: 'error',
+      head: `エラー注文件数超過 — ${STATUS_COUNTS.error}件（閾値：5件）`,
+      detail: `ステータス=エラー の件数が監視閾値を超えています。直ちに確認してください。`
+    });
+  }
+
+  const listEl = document.getElementById('alert-list');
+  if (alerts.length === 0) {
+    listEl.innerHTML = '<div class="no-alert">● 現在、異常検知アラートはありません</div>';
+    return;
+  }
+  alerts.forEach(a => {
+    const div = document.createElement('div');
+    div.className = 'alert-item ' + (a.type === 'warn' ? 'alert-warn' : 'alert-err');
+    div.innerHTML = `
+      <div class="alert-icon">${a.type === 'warn' ? '▲' : '●'}</div>
+      <div class="alert-body">
+        <div class="alert-head">${a.head}</div>
+        <div class="alert-detail">${a.detail}</div>
+      </div>`;
+    listEl.appendChild(div);
+  });
+}
+
+/* ════════════════════════════════════
+   8. ORDER TABLE
+════════════════════════════════════ */
+function statusBadge(st) {
+  const map = {
+    done:    ['badge-done',    '約定済'],
+    open:    ['badge-open',    '受付中'],
+    partial: ['badge-partial', '一部約定'],
+    cancel:  ['badge-cancel',  '取消済'],
+    error:   ['badge-error',   'エラー'],
+  };
+  const [cls, lbl] = map[st] || ['badge-open', st];
+  return `<span class="badge ${cls}">${lbl}</span>`;
+}
+
+function initTable() {
+  const tbody = document.getElementById('order-tbody');
+  const top20 = ORDERS.slice(0, 20);
+  top20.forEach(o => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="td-mono" style="color:#4a6080;font-size:11px">${o.id}</td>
+      <td class="td-mono">${o.time}</td>
+      <td class="td-mono" style="color:#4a6080">${o.code}</td>
+      <td>${o.name}</td>
+      <td class="${o.side==='買'?'td-buy':'td-sell'}">${o.side}</td>
+      <td class="td-mono" style="text-align:right">${o.lots.toLocaleString()}</td>
+      <td class="td-mono" style="text-align:right">${o.price.toLocaleString()}</td>
+      <td>${statusBadge(o.status)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+/* ════════════════════════════════════
+   INIT
+════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded', () => {
+  initKPIs();
+  initPie();
+  initBar();
+  initLine();
+  initAlerts();
+  initTable();
+});
+</script>
+</body>
+</html>
